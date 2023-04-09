@@ -4,4 +4,4 @@
 
 2 It only supports iocp http, and there is no schedule to support https now.
 
-3 Just unzip the zip files to the current position in objs/lib, and .lib files are precompiled, if you want to change them you    can compile thme by yourself.
+3 Just unzip the zip files to the current position in objs/lib, and .lib files are precompiled, if you want to change them you    can compile them by yourself.
