@@ -177,6 +177,7 @@ ngx_overlapped_wsarecv_chain(ngx_connection_t *c, ngx_chain_t *chain, off_t limi
 		ngx_log_error(NGX_LOG_ALERT, c->log, 0, "second wsa post");
 		return NGX_AGAIN;
 	}
+
 	if (rev->complete) {
 		rev->complete = 0;
 
@@ -189,7 +190,7 @@ ngx_overlapped_wsarecv_chain(ngx_connection_t *c, ngx_chain_t *chain, off_t limi
 			ngx_log_debug3(NGX_LOG_DEBUG_EVENT, c->log, 0,
 				"WSARecv ovlp: fd:%d %ul of %z",
 				c->fd, rev->available, size);
-			printf("return len=%d\n", rev->available);
+
 			return rev->available;
 		}
 
@@ -254,7 +255,7 @@ ngx_overlapped_wsarecv_chain(ngx_connection_t *c, ngx_chain_t *chain, off_t limi
 
 	if (rc == -1) {
 		err = ngx_socket_errno;
-
+        rev->ready = 0;
 		if (err == WSA_IO_PENDING || err == 0) {
 			rev->active = 1;
 			ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, err,
@@ -267,9 +268,10 @@ ngx_overlapped_wsarecv_chain(ngx_connection_t *c, ngx_chain_t *chain, off_t limi
 		if (n == NGX_ERROR) {
 			rev->error = 1;
 		}
-		printf("rc=%d,err=%d,n=%d,bytes=%d/%d\n", rc, err, n, bytes, size);
+
 		return n;
 	}
+	
 	if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
 
 		/*

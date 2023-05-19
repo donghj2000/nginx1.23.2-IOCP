@@ -160,6 +160,14 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
     if (type == SOCK_STREAM) {
         c->recv = ngx_recv;
         c->send = ngx_send;
+
+#if (NGX_HAVE_IOCP)
+#if (NGX_HTTP_SSL)
+		c->recv_iocp = ngx_recv;
+		c->send_iocp = ngx_send;
+#endif
+#endif
+
         c->recv_chain = ngx_recv_chain;
         c->send_chain = ngx_send_chain;
 
@@ -202,11 +210,13 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
             goto failed;
         }
     }
-#if (NGX_WIN32)
+	
+#if (NGX_HAVE_IOCP)
 	if (ngx_event_flags & NGX_USE_IOCP_EVENT) 
 	{
 		ngx_log_debug3(NGX_LOG_DEBUG_EVENT, pc->log, 0,
 			"connect to %V, fd:%d #%uA", pc->name, s, c->number);
+			
 		if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
 			rev->ovlp.event = rev;
 			wev->ovlp.event = wev;
@@ -218,6 +228,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 			rev->ready = 1;
 			wev->ready = 1;
 		}
+		
 		struct sockaddr_in local_addr;
 		ZeroMemory(&local_addr, sizeof(struct sockaddr_in));
 		local_addr.sin_family = AF_INET;
@@ -226,8 +237,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 		DWORD dwBytesSent = 0;
 		wev->ovlp.opp_type = NGX_IOCP_CONNECT;
 		rc = 0;
-		if (!ngx_connectex((SOCKET)s, (const struct sockaddr *)pc->sockaddr, 16, NULL, 0, &dwBytesSent, (LPOVERLAPPED)&wev->ovlp))
-		{
+		if (!ngx_connectex((SOCKET)s, (const struct sockaddr *)pc->sockaddr, 16, NULL, 0, &dwBytesSent, (LPOVERLAPPED)&wev->ovlp)) {
 			rc = -1;
 		}
 	} else {
@@ -333,7 +343,11 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 
         event = NGX_LEVEL_EVENT;
     }
-	if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) {
+
+#if (NGX_HAVE_IOCP)
+	if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) 
+#endif
+    {	
 		if (ngx_add_event(rev, NGX_READ_EVENT, event) != NGX_OK) {
 			goto failed;
 		}
@@ -342,7 +356,10 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
     if (rc == -1) {
 
         /* NGX_EINPROGRESS */
-		if (!ngx_event_flags & NGX_USE_IOCP_EVENT) {
+#if (NGX_HAVE_IOCP)
+		if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) 
+#endif
+		{
 			if (ngx_add_event(wev, NGX_WRITE_EVENT, event) != NGX_OK) {
 				goto failed;
 			}

@@ -8,6 +8,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_event.h>
+#include <ngx_http.h>
 
 
 #if 0
@@ -37,13 +38,102 @@ static ngx_int_t ngx_output_chain_get_buf(ngx_output_chain_ctx_t *ctx,
     off_t bsize);
 static ngx_int_t ngx_output_chain_copy_buf(ngx_output_chain_ctx_t *ctx);
 
+extern ngx_module_t  ngx_http_copy_filter_module;
 
 ngx_int_t
 ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
 {
     off_t         bsize;
     ngx_int_t     rc, last;
-    ngx_chain_t  *cl, *out, **last_out;
+    ngx_chain_t  *cl, *out = NULL, **last_out;
+
+#if (NGX_HAVE_IOCP)
+
+	ngx_http_request_t      *r = NULL;
+	ngx_connection_t        *c = NULL;
+	ngx_chain_writer_ctx_t  *writer = NULL;
+	ngx_chain_t             *chain = NULL, *ln = NULL;
+	
+	if (ctx->tag == (ngx_buf_tag_t)&ngx_http_copy_filter_module) {
+		r = ctx->filter_ctx;   //send to client
+		c = r->connection;
+	} else {
+		writer = (ngx_chain_writer_ctx_t*)ctx->filter_ctx;  //send to back server
+		c = writer->connection;
+		r = c->data;
+	}
+
+	if (c->buffered) {
+		if (ctx->tag == (ngx_buf_tag_t)&ngx_http_copy_filter_module) {
+
+			chain = c->send_chain(c, out, 0);
+
+			for (cl = r->out; cl && cl != chain; /* void */) {
+				ln = cl;
+				cl = cl->next;
+				ngx_free_chain(r->pool, ln);
+			}
+
+			r->out = chain;
+
+			if (chain) {
+				c->buffered |= NGX_HTTP_WRITE_BUFFERED;
+				return NGX_AGAIN;
+			} else {
+				c->buffered &= ~NGX_HTTP_WRITE_BUFFERED;
+				if (c->ssl || (!c->ssl && !c->buffered)) {
+					ngx_post_event(c->write, &ngx_posted_next_events);
+				}
+			}
+
+			if ((c->buffered & NGX_LOWLEVEL_BUFFERED) && r->postponed == NULL) {
+				return NGX_AGAIN;
+			}
+			
+
+			return NGX_DONE;
+		} else {
+			writer = (ngx_chain_writer_ctx_t*)ctx->filter_ctx;
+			c = writer->connection;
+
+			chain = c->send_chain(c, out, 0);   
+			if (chain) {
+				c->buffered |= NGX_HTTP_WRITE_BUFFERED;
+			} else { // ssl buffering or non-ssl send completion
+				c->buffered &= ~NGX_HTTP_WRITE_BUFFERED;
+				if (c->ssl || (!c->ssl && !c->buffered)) {
+					
+					if (!r->request_body_no_buffering) {
+						ngx_post_event(c->write, &ngx_posted_next_events);
+
+					}
+				}
+			}
+
+			for (cl = writer->out; cl && cl != chain; /* void */) {
+				ln = cl;
+				cl = cl->next;
+				ngx_free_chain(ctx->pool, ln);
+			}
+
+			writer->out = chain;
+
+			ngx_chain_update_chains(ctx->pool, &ctx->free, &ctx->busy, &out,
+				ctx->tag);
+
+			if (writer->out == NULL) {
+				writer->last = &writer->out;
+			}
+			
+			if (c->buffered & NGX_LOWLEVEL_BUFFERED) {
+				return NGX_AGAIN;
+			} else {
+				return NGX_DONE;
+			}
+		}
+
+	}
+#endif
 
     if (ctx->in == NULL && ctx->busy == NULL
 #if (NGX_HAVE_FILE_AIO || NGX_THREADS)
@@ -236,6 +326,15 @@ ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
         ngx_chain_update_chains(ctx->pool, &ctx->free, &ctx->busy, &out,
                                 ctx->tag);
         last_out = &out;
+
+#if (NGX_HAVE_IOCP)		
+		if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+			if (last == NGX_AGAIN) {
+				return last;
+			}
+		}
+#endif
+
     }
 }
 
@@ -780,8 +879,28 @@ ngx_chain_writer(void *data, ngx_chain_t *in)
         return NGX_ERROR;
     }
 
+#if (NGX_HAVE_IOCP)  //send next packet after prev packet completion
+	if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+	
+		if (chain) {
+			c->buffered |= NGX_HTTP_WRITE_BUFFERED;
+		} else { // ssl buffering or non-ssl send completion
+			c->buffered &= ~NGX_HTTP_WRITE_BUFFERED;
+			
+			if (c->write->ready) {
+				if ((c->ssl && c->buffered) || (!c->ssl && !c->buffered)) {
+					ngx_post_event(c->write, &ngx_posted_next_events);
+				}
+			}
+		}
+	}
+#endif
+
     if (chain && c->write->ready) {
-        ngx_post_event(c->write, &ngx_posted_next_events);
+#if (NGX_HAVE_IOCP)  //send next packet after prev packet completion
+        if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) 
+#endif
+            ngx_post_event(c->write, &ngx_posted_next_events);
     }
 
     for (cl = ctx->out; cl && cl != chain; /* void */) {

@@ -444,11 +444,15 @@ ngx_http_wait_request_handler(ngx_event_t *rev)
         /*
          * We are trying to not hold c->buffer's memory for an idle connection.
 	    */
-		if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) {
-	        if (ngx_pfree(c->pool, b->start) == NGX_OK) {
-	            b->start = NULL;
-	        }
-		}
+		 
+#if (NGX_HAVE_IOCP)
+        if (!(ngx_event_flags & NGX_USE_IOCP_EVENT))  
+#endif
+		{
+            if (ngx_pfree(c->pool, b->start) == NGX_OK) {
+                b->start = NULL;
+            }
+        }
 
         return;
     }
@@ -638,6 +642,89 @@ ngx_http_alloc_request(ngx_connection_t *c)
 
 
 #if (NGX_HTTP_SSL)
+#if (NGX_HAVE_IOCP)
+static int bio_iocp_write(BIO *h, const char *buf, int num);
+static int bio_iocp_read(BIO *h, char *buf, int size);
+static long bio_iocp_ctrl(BIO *h, int cmd, long arg1, void *arg2);
+
+BIO *BIO_new_iocp(ngx_connection_t* c)
+{
+	BIO_METHOD *m = BIO_meth_new(BIO_get_new_index() | BIO_TYPE_SOURCE_SINK, "bio_iocp");
+	BIO_meth_set_ctrl(m, bio_iocp_ctrl); 
+	BIO_meth_set_read(m, bio_iocp_read);						
+	BIO_meth_set_write(m, bio_iocp_write);
+
+	BIO* b = BIO_new(m);
+	BIO_set_data(b, c);
+	BIO_set_init(b, 1);
+	BIO_set_shutdown(b, 0);
+	return b;
+}
+
+static long bio_iocp_ctrl(BIO* b, int cmd, long num, void* ptr)
+{
+	int ret = 0;
+	switch (cmd) 
+	{
+	    case BIO_CTRL_FLUSH:
+		    ret = 1;
+		    break;
+	    default:
+		    ret = 0;
+	}
+	return ret;
+}
+
+
+static int bio_iocp_read(BIO *b, char *out, int len)
+{
+	ngx_connection_t* c = (ngx_connection_t*)BIO_get_data(b);
+	int ret = -1, buf_len = 0;
+
+	if(out != NULL) {
+
+		buf_len = c->recvbuf_iocp->end - c->recvbuf_iocp->start;
+		ret = min(min(len, c->recvbuf_iocp->last - c->recvbuf_iocp->pos), buf_len);
+		
+		if (ret > 0) {
+			memcpy(out, c->recvbuf_iocp->pos, ret);	
+			
+			c->recvbuf_iocp->pos += ret;
+			c->read->complete = 0;
+
+			return ret;
+		}
+
+		if (c->recvbuf_iocp->pos >= c->recvbuf_iocp->last) {
+
+			c->recvbuf_iocp->pos = c->recvbuf_iocp->last = c->recvbuf_iocp->start;
+			c->read->complete = 0;
+			ret = c->recv_iocp(c, (void*)c->recvbuf_iocp->pos, (size_t)(buf_len));
+
+			BIO_clear_retry_flags(b);
+			if (ret < 0) {
+				BIO_set_retry_read(b);
+			}
+			
+			return ret;
+		}
+	}
+	return 0;
+}
+
+static int bio_iocp_write(BIO *b, const char *in, int len)
+{
+	ngx_connection_t* c = (ngx_connection_t*)BIO_get_data(b);
+	int ret = -1;
+
+	ret = c->send_iocp(c, (const void*)in, (size_t)len);
+	BIO_clear_retry_flags(b);
+	BIO_set_retry_write(b);
+	
+	return ret;
+}
+
+#endif
 
 static void
 ngx_http_ssl_handshake(ngx_event_t *rev)
@@ -671,8 +758,23 @@ ngx_http_ssl_handshake(ngx_event_t *rev)
     }
 
     size = hc->proxy_protocol ? sizeof(buf) : 1;
-
+	
+#if (NGX_HAVE_IOCP)
+	if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+	
+		if (rev->ready && rev->available > 0 && rev->available <= c->recvbuf_iocp->end - c->recvbuf_iocp->start) {
+			ngx_memcpy(buf, c->recvbuf_iocp->pos, size);
+			n = ngx_min(rev->available, size);
+		}
+		
+	} else {
+	
+	    n = recv(c->fd, (char *) buf, size, MSG_PEEK);
+		
+	}
+#else
     n = recv(c->fd, (char *) buf, size, MSG_PEEK);
+#endif
 
     err = ngx_socket_errno;
 
@@ -755,6 +857,15 @@ ngx_http_ssl_handshake(ngx_event_t *rev)
 
             ngx_reusable_connection(c, 0);
 
+#if (NGX_HAVE_IOCP)
+			if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+			
+				BIO* b = BIO_new_iocp(c);
+				SSL_set_bio(c->ssl->connection, b, b);
+				
+			}
+#endif
+
             rc = ngx_ssl_handshake(c);
 
             if (rc == NGX_AGAIN) {
@@ -776,6 +887,17 @@ ngx_http_ssl_handshake(ngx_event_t *rev)
 
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0, "plain http");
 
+#if (NGX_HAVE_IOCP)
+		if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+		
+			int len = 0;
+			cscf = ngx_http_get_module_srv_conf(hc->conf_ctx, ngx_http_core_module);
+			c->buffer->end = c->buffer->start + cscf->client_header_buffer_size;
+			len = min(rev->available, c->recvbuf_iocp->end - c->recvbuf_iocp->start);
+			ngx_memcpy(c->buffer->pos, c->recvbuf_iocp->pos, len);
+		
+		}
+#endif
         c->log->action = "waiting for request";
 
         rev->handler = ngx_http_wait_request_handler;
@@ -3142,20 +3264,25 @@ ngx_http_set_keepalive(ngx_http_request_t *r)
      */
 
     b = c->buffer;
+    if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) {
+	
+	    if (ngx_pfree(c->pool, b->start) == NGX_OK) {
 
-    if (ngx_pfree(c->pool, b->start) == NGX_OK) {
+	        /*
+	         * the special note for ngx_http_keepalive_handler() that
+	         * c->buffer's memory was freed
+	         */
 
-        /*
-         * the special note for ngx_http_keepalive_handler() that
-         * c->buffer's memory was freed
-         */
+	        b->pos = NULL;
 
-        b->pos = NULL;
-
-    } else {
+	    } else {
+	        b->pos = b->start;
+	        b->last = b->start;
+	    }
+	} else {
         b->pos = b->start;
         b->last = b->start;
-    }
+	}
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0, "hc free: %p",
                    hc->free);
@@ -3318,15 +3445,17 @@ ngx_http_keepalive_handler(ngx_event_t *rev)
          * Like ngx_http_set_keepalive() we are trying to not hold
          * c->buffer's memory for a keepalive connection.
          */
+		if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) {
 
-        if (ngx_pfree(c->pool, b->start) == NGX_OK) {
+			if (ngx_pfree(c->pool, b->start) == NGX_OK) {
 
-            /*
-             * the special note that c->buffer's memory was freed
-             */
+				/*
+				 * the special note that c->buffer's memory was freed
+				 */
 
-            b->pos = NULL;
-        }
+				b->pos = NULL;
+			}
+		}
 
         return;
     }
@@ -3505,6 +3634,10 @@ ngx_http_empty_handler(ngx_event_t *wev)
 {
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, wev->log, 0, "http empty handler");
 
+	if (wev->write) {
+		wev->complete = 0;
+	}
+	
     return;
 }
 

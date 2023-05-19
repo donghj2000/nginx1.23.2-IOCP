@@ -23,6 +23,7 @@ typedef struct {
     ngx_event_t     *event;
 	ngx_uint_t      opp_type;
     int              error;
+	ngx_chain_t     *in;
 } ngx_event_ovlp_t;
 
 #endif

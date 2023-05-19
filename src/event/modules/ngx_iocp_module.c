@@ -235,7 +235,7 @@ static ngx_int_t
 ngx_iocp_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
 {
     int                rc;
-	ULONG_PTR          key=0;
+	ULONG_PTR          key = 0;
 	
     u_long             bytes;
     ngx_err_t          err;
@@ -341,6 +341,13 @@ ngx_iocp_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     case NGX_IOCP_IO:
         ev->complete = 1;
         ev->ready = 1;
+		if (ev->write == 0 && bytes > 0) {
+			if (c->ssl) {
+				if (c->recvbuf_iocp && c->recvbuf_iocp->last) {
+					c->recvbuf_iocp->last += bytes;
+				}
+	        } 
+		}
         break;
 
     case NGX_IOCP_CONNECT:

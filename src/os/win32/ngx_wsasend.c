@@ -98,9 +98,9 @@ ngx_overlapped_wsasend(ngx_connection_t *c, u_char *buf, size_t size)
 
         sent = 0;
 
-        ovlp = (LPWSAOVERLAPPED) &c->write->ovlp;
+        ovlp = (LPWSAOVERLAPPED) &wev->ovlp;
         ngx_memzero(ovlp, sizeof(WSAOVERLAPPED));
-
+        wev->ovlp.opp_type = NGX_IOCP_IO;
         n = WSASend(c->fd, &wsabuf, 1, &sent, 0, ovlp, NULL);
 
         ngx_log_debug4(NGX_LOG_DEBUG_EVENT, c->log, 0,

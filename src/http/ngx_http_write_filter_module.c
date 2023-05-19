@@ -327,9 +327,20 @@ ngx_http_write_filter(ngx_http_request_t *r, ngx_chain_t *in)
         }
     }
 
+#if (NGX_HAVE_IOCP)
+	if (!chain && c->ssl && c->ssl->handshaked) {
+		ngx_post_event(c->write, &ngx_posted_next_events);
+	}
+#endif
+
     if (chain && c->write->ready && !c->write->delayed) {
-        ngx_post_event(c->write, &ngx_posted_next_events);
-    }
+#if (NGX_HAVE_IOCP)  //send next packet after prev packet completion
+		if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) 
+#endif
+		{ 
+			ngx_post_event(c->write, &ngx_posted_next_events);
+		}
+	}
 
     for (cl = r->out; cl && cl != chain; /* void */) {
         ln = cl;

@@ -146,7 +146,7 @@ ngx_event_pipe_read_upstream(ngx_event_pipe_t *p)
             break;
         }
 
-        if (p->preread_bufs) {
+        if (p->preread_bufs && p->preread_size > 0) {
 
             /* use the pre-read bufs if they exist */
 
@@ -325,10 +325,26 @@ ngx_event_pipe_read_upstream(ngx_event_pipe_t *p)
                     ngx_event_pipe_remove_shadow_links(chain->buf);
                 }
 
+#if (NGX_HAVE_IOCP)
+			    if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+				    if (!p->upstream->ssl) {
+					    p->preread_bufs = chain;
+					    p->preread_size = 0;
+				    }
+			    }
+#endif
                 break;
             }
 
             p->read = 1;
+#if (NGX_HAVE_IOCP)
+			if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+				if (!p->upstream->ssl) {
+					if (p->preread_size == 0)
+						chain = p->preread_bufs;
+				}
+			}
+#endif
 
             if (n == 0) {
                 p->upstream_eof = 1;
@@ -380,6 +396,15 @@ ngx_event_pipe_read_upstream(ngx_event_pipe_t *p)
             ngx_add_timer(p->upstream->read, delay);
             break;
         }
+		
+#if (NGX_HAVE_IOCP) 
+	if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+		if (p->read == 1) {
+			break;
+		}
+	}
+#endif
+
     }
 
 #if (NGX_DEBUG)
@@ -577,9 +602,23 @@ ngx_event_pipe_write_to_downstream(ngx_event_pipe_t *p)
                     return ngx_event_pipe_drain_chains(p);
                 }
 
-                p->in = NULL;
-            }
+				p->in = NULL;
+				
+#if (NGX_HAVE_IOCP)
+				if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+					if (rc == NGX_AGAIN) {
+						return rc;
+					}
+				}
+#endif
 
+			}
+			
+#if (NGX_HAVE_IOCP)
+			if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+				rc = p->output_filter(p->output_ctx, NULL);
+			}
+#endif
             ngx_log_debug0(NGX_LOG_DEBUG_EVENT, p->log, 0,
                            "pipe write downstream done");
 
@@ -678,6 +717,12 @@ ngx_event_pipe_write_to_downstream(ngx_event_pipe_t *p)
 
         ngx_log_debug2(NGX_LOG_DEBUG_EVENT, p->log, 0,
                        "pipe write: out:%p, f:%ui", out, flush);
+					   
+#if (NGX_HAVE_IOCP)
+		if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+		    rc = p->output_filter(p->output_ctx, out);
+		}
+#endif
 
         if (out == NULL) {
 
@@ -690,9 +735,15 @@ ngx_event_pipe_write_to_downstream(ngx_event_pipe_t *p)
                 return NGX_BUSY;
             }
         }
-
-        rc = p->output_filter(p->output_ctx, out);
-
+		
+#if (NGX_HAVE_IOCP)
+		if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+		} else 
+#endif  
+        {
+            rc = p->output_filter(p->output_ctx, out);
+        }
+		
         ngx_chain_update_chains(p->pool, &p->free, &p->busy, &out, p->tag);
 
         if (rc == NGX_ERROR) {

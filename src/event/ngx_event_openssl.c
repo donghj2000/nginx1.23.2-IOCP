@@ -2268,17 +2268,20 @@ ngx_ssl_recv(ngx_connection_t *c, u_char *buf, size_t size)
                 } else {
 
 #if (NGX_HAVE_FIONREAD)
+	#if (NGX_HAVE_IOCP)
+					if (!(ngx_event_flags & NGX_USE_IOCP_EVENT)) 
+	#endif
+					{
+						if (ngx_socket_nread(c->fd, &c->read->available) == -1) {
+							c->read->error = 1;
+							ngx_connection_error(c, ngx_socket_errno,
+								ngx_socket_nread_n " failed");
+							return NGX_ERROR;
+						}
 
-                    if (ngx_socket_nread(c->fd, &c->read->available) == -1) {
-                        c->read->error = 1;
-                        ngx_connection_error(c, ngx_socket_errno,
-                                             ngx_socket_nread_n " failed");
-                        return NGX_ERROR;
-                    }
-
-                    ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
-                                   "SSL_read: avail:%d", c->read->available);
-
+						ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
+							"SSL_read: avail:%d", c->read->available);
+					}
 #endif
                 }
 
