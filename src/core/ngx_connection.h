@@ -128,7 +128,15 @@ struct ngx_connection_s {
 
     ngx_recv_pt         recv;
     ngx_send_pt         send;
-    ngx_recv_chain_pt   recv_chain;
+
+#if (NGX_HAVE_IOCP)
+#if (NGX_HTTP_SSL)
+	ngx_recv_pt         recv_iocp;
+	ngx_send_pt         send_iocp;
+#endif
+#endif
+
+	ngx_recv_chain_pt   recv_chain;
     ngx_send_chain_pt   send_chain;
 
     ngx_listening_t    *listening;
@@ -157,6 +165,13 @@ struct ngx_connection_s {
     socklen_t           local_socklen;
 
     ngx_buf_t          *buffer;
+
+#if (NGX_HAVE_IOCP)
+#if (NGX_HTTP_SSL)
+	ngx_buf_t          *recvbuf_iocp;
+	ngx_buf_t          *sendbuf_iocp;
+#endif
+#endif
 
     ngx_queue_t         queue;
 
