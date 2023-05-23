@@ -160,6 +160,7 @@ ngx_overlapped_wsarecv(ngx_connection_t *c, u_char *buf, size_t size)
     wsabuf[0].len = size;
     flags = 0;
     bytes = 0;
+	rev->ovlp.error = 0;
 	rev->ovlp.opp_type = NGX_IOCP_IO;
     rc = WSARecv(c->fd, wsabuf, 1, &bytes, &flags, ovlp, NULL);
 

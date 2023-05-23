@@ -249,6 +249,7 @@ ngx_overlapped_wsarecv_chain(ngx_connection_t *c, ngx_chain_t *chain, off_t limi
 
 	ovlp = (LPWSAOVERLAPPED)&c->read->ovlp;
 	ngx_memzero(ovlp, sizeof(WSAOVERLAPPED));
+	c->read->ovlp.error = 0;
 	c->read->ovlp.opp_type = NGX_IOCP_IO;
 	rc = WSARecv(c->fd, vec.elts, vec.nelts, &bytes, &flags, ovlp, NULL);
 	rev->complete = 0;

@@ -684,7 +684,7 @@ static int bio_iocp_read(BIO *b, char *out, int len)
 	if(out != NULL) {
 
 		buf_len = c->recvbuf_iocp->end - c->recvbuf_iocp->start;
-		ret = min(min(len, c->recvbuf_iocp->last - c->recvbuf_iocp->pos), buf_len);
+		ret = ngx_min(ngx_min(len, c->recvbuf_iocp->last - c->recvbuf_iocp->pos), buf_len);
 		
 		if (ret > 0) {
 			memcpy(out, c->recvbuf_iocp->pos, ret);	
@@ -715,12 +715,35 @@ static int bio_iocp_read(BIO *b, char *out, int len)
 static int bio_iocp_write(BIO *b, const char *in, int len)
 {
 	ngx_connection_t* c = (ngx_connection_t*)BIO_get_data(b);
-	int ret = -1;
+	int ret = -1, buf_len;
 
-	ret = c->send_iocp(c, (const void*)in, (size_t)len);
-	BIO_clear_retry_flags(b);
-	BIO_set_retry_write(b);
-	
+	if (in != NULL) {
+		buf_len = c->sendbuf_iocp->end - c->sendbuf_iocp->start;
+		ret = ngx_min(ngx_min(len, c->sendbuf_iocp->last - c->sendbuf_iocp->pos), buf_len);
+
+		if (c->write->available > 0) {
+
+			ret = ngx_min(c->write->available, len);
+			c->write->complete = 0;
+			c->write->available -= ret;
+			if (c->write->available <= 0) {
+				c->sendbuf_iocp->pos = c->sendbuf_iocp->last = c->sendbuf_iocp->start;
+				c->write->available = 0;
+			}
+			
+			return ret;
+		} else if(c->sendbuf_iocp->last == c->sendbuf_iocp->start && c->write->complete != 2){
+			
+			c->sendbuf_iocp->pos = c->sendbuf_iocp->last = c->sendbuf_iocp->start;
+			len = ngx_min(buf_len, len);
+			memcpy(c->sendbuf_iocp->start, in, len);
+			ret = c->send_iocp(c, (const void*)c->sendbuf_iocp->start, (size_t)len);
+			BIO_clear_retry_flags(b);
+			BIO_set_retry_write(b);
+
+			return ret;
+		}
+	}
 	return ret;
 }
 

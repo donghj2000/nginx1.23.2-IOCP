@@ -235,7 +235,9 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 		int irt = bind(s, (const struct sockaddr *)(&local_addr), sizeof(struct sockaddr_in));
 
 		DWORD dwBytesSent = 0;
+		ngx_memzero(&wev->ovlp, sizeof(WSAOVERLAPPED));
 		wev->ovlp.opp_type = NGX_IOCP_CONNECT;
+		wev->ovlp.error = 0;
 		rc = 0;
 		if (!ngx_connectex((SOCKET)s, (const struct sockaddr *)pc->sockaddr, 16, NULL, 0, &dwBytesSent, (LPOVERLAPPED)&wev->ovlp)) {
 			rc = -1;

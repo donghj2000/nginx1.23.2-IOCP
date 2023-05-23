@@ -602,8 +602,6 @@ ngx_event_pipe_write_to_downstream(ngx_event_pipe_t *p)
                     return ngx_event_pipe_drain_chains(p);
                 }
 
-				p->in = NULL;
-				
 #if (NGX_HAVE_IOCP)
 				if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
 					if (rc == NGX_AGAIN) {
@@ -611,6 +609,7 @@ ngx_event_pipe_write_to_downstream(ngx_event_pipe_t *p)
 					}
 				}
 #endif
+				p->in = NULL;
 
 			}
 			

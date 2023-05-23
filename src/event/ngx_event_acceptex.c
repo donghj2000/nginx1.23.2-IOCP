@@ -325,6 +325,8 @@ ngx_event_post_acceptex(ngx_listening_t *ls, ngx_uint_t n)
 			buffer = c->buffer;
 		}
 		
+		ngx_memzero(&wev->ovlp, sizeof(WSAOVERLAPPED));
+		rev->ovlp.error = 0;
 		rev->ovlp.opp_type = NGX_IOCP_ACCEPT;
         if (ngx_acceptex(ls->fd, s, buffer->pos, ls->post_accept_buffer_size,
                          ls->socklen + 16, ls->socklen + 16,

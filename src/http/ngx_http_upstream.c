@@ -1756,7 +1756,6 @@ ngx_http_upstream_ssl_init_connection(ngx_http_request_t *r,
 			return NGX_ERROR;
 		}
 	
-		c->read->complete = 1;
 	}
 #endif
 
@@ -4513,7 +4512,10 @@ ngx_http_upstream_process_request(ngx_http_request_t *r,
             if (p->upstream_done
                 || (p->upstream_eof && p->length == -1))
             {
-                ngx_http_upstream_finalize_request(r, u, 0);
+#if (NGX_HAVE_IOCP)
+				if (p->downstream_done && ngx_event_flags & NGX_USE_IOCP_EVENT)
+#endif
+                    ngx_http_upstream_finalize_request(r, u, 0);
                 return;
             }
 

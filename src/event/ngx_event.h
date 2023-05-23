@@ -53,7 +53,7 @@ struct ngx_event_s {
     unsigned         oneshot:1;
 
     /* aio operation is complete */
-    unsigned         complete:1;
+    unsigned         complete:2;
 
     unsigned         eof:1;
     unsigned         error:1;

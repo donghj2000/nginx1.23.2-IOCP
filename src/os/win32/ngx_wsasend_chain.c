@@ -254,7 +254,7 @@ ngx_overlapped_wsasend_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 		ngx_memzero(ovlp, sizeof(WSAOVERLAPPED));
 		c->write->ovlp.opp_type = NGX_IOCP_IO;
 		c->write->ovlp.in = in;
-
+		c->write->ovlp.error = 0;
 		rc = WSASend(c->fd, vec.elts, vec.nelts, &sent, 0, ovlp, NULL);
 
         wev->complete = 0;

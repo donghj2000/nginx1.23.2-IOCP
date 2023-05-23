@@ -250,10 +250,10 @@ ngx_iocp_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     }
 
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0, "iocp timer: %M", timer);
-
+	
     rc = GetQueuedCompletionStatus(iocp, &bytes, (PULONG_PTR)&cTmp,
                                    (LPOVERLAPPED *) &ovlp, (u_long) timer);
-
+	
     if (rc == 0) {
         err = ngx_errno;
     } else {
@@ -294,6 +294,7 @@ ngx_iocp_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     if (ovlp == NULL) {
         ngx_log_error(NGX_LOG_ALERT, cycle->log, 0,
                       "GetQueuedCompletionStatus() returned no operation");
+		ovlp->error = 0;
         return NGX_ERROR;
     }
 
@@ -318,13 +319,14 @@ ngx_iocp_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
 
         ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, err,
                        "iocp: aborted event %p", ev);
-
+		ovlp->error = 0;
         return NGX_OK;
     }
 
     if (err) {
         ngx_log_error(NGX_LOG_ALERT, cycle->log, err,
                       "GetQueuedCompletionStatus() returned operation error");
+		ovlp->error = 0;
 		return NGX_OK;
     }
 
@@ -341,13 +343,17 @@ ngx_iocp_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     case NGX_IOCP_IO:
         ev->complete = 1;
         ev->ready = 1;
-		if (ev->write == 0 && bytes > 0) {
-			if (c->ssl) {
+		if (c->ssl && bytes > 0) {
+			if (ev->write == 0) {
 				if (c->recvbuf_iocp && c->recvbuf_iocp->last) {
 					c->recvbuf_iocp->last += bytes;
 				}
-	        } 
-		}
+			} else {
+				if (c->sendbuf_iocp && c->sendbuf_iocp->last) {
+					c->sendbuf_iocp->last += bytes;
+				}
+			}
+		} 
         break;
 
     case NGX_IOCP_CONNECT:
@@ -358,8 +364,8 @@ ngx_iocp_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
 
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                    "iocp event handler: %p", ev->handler);
-
-    ev->handler(ev);
+	if (ev->handler)
+        ev->handler(ev);
 
     return NGX_OK;
 }
