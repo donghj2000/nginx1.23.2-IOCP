@@ -2164,12 +2164,17 @@ ngx_http_proxy_copy_filter(ngx_event_pipe_t *p, ngx_buf_t *buf)
         b->last = b->pos + p->length;
         p->upstream_done = 1;
 
-        return NGX_OK;
+		b->last_buf = 1;
+        
+		return NGX_OK;
     }
 
     p->length -= b->last - b->pos;
 
     if (p->length == 0) {
+
+		b->last_buf = 1;
+
         r = p->input_ctx;
         r->upstream->keepalive = !r->upstream->headers_in.connection_close;
     }

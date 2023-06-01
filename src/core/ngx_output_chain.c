@@ -48,11 +48,13 @@ ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
     ngx_chain_t  *cl, *out = NULL, **last_out;
 
 #if (NGX_HAVE_IOCP)
-
+if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
 	ngx_http_request_t      *r = NULL;
 	ngx_connection_t        *c = NULL;
 	ngx_chain_writer_ctx_t  *writer = NULL;
 	ngx_chain_t             *chain = NULL, *ln = NULL;
+	ngx_http_upstream_t     *u;
+	ngx_event_pipe_t        *pipe;
 	
 	if (ctx->tag == (ngx_buf_tag_t)&ngx_http_copy_filter_module) {
 		r = ctx->filter_ctx;   //send to client
@@ -63,28 +65,44 @@ ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
 		r = c->data;
 	}
 
-	if (c->buffered) {
+	if (c->buffered && c->write->complete == 1) {
 		if (ctx->tag == (ngx_buf_tag_t)&ngx_http_copy_filter_module) {
+			ngx_http_request_t       *r = (ngx_http_request_t *)c->data;
+			ngx_http_upstream_t      *u = r->upstream;
+			ngx_event_pipe_t         *p;
 
 			if ((c->buffered & NGX_HTTP_WRITE_BUFFERED) && c->write->complete == 0)
 				return NGX_AGAIN;
 
 			chain = c->send_chain(c, out, 0);
+			
+			if (!c->ssl) {
+				for (cl = r->out; cl && cl != chain; /* void */) {
+					ln = cl;
+					cl = cl->next;
+					ngx_free_chain(r->pool, ln);
+				}
 
-			for (cl = r->out; cl && cl != chain; /* void */) {
-				ln = cl;
-				cl = cl->next;
-				ngx_free_chain(r->pool, ln);
+			    r->out = chain;
 			}
 
-			r->out = chain;
+			ngx_chain_update_chains(ctx->pool, &ctx->free, &ctx->busy, &out,
+				ctx->tag);
 
-			if (chain) {
+			if ((u && r->out) || (!u && chain)) {
 				c->buffered |= NGX_HTTP_WRITE_BUFFERED;
+				ngx_post_event(c->write, &ngx_posted_next_events);
+
 				return NGX_AGAIN;
 			} else {
 				c->buffered &= ~NGX_HTTP_WRITE_BUFFERED;
 				if (c->ssl || (!c->ssl && !c->buffered)) {
+					if (u) {
+						p = u->pipe;
+						if (p->downstream_done == 1)
+							return NGX_DONE;
+					}
+
 					ngx_post_event(c->write, &ngx_posted_next_events);
 					return NGX_AGAIN;
 				}
@@ -109,14 +127,15 @@ ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
 				}
 			}
 
-			for (cl = writer->out; cl && cl != chain; /* void */) {
-				ln = cl;
-				cl = cl->next;
-				ngx_free_chain(ctx->pool, ln);
-			}
-			if (!c->ssl)
+			if (!c->ssl) {
+			    for (cl = writer->out; cl && cl != chain; /* void */) {
+				    ln = cl;
+				    cl = cl->next;
+				    ngx_free_chain(ctx->pool, ln);
+			    }
+			
 			    writer->out = chain;
-
+            }
 			ngx_chain_update_chains(ctx->pool, &ctx->free, &ctx->busy, &out,
 				ctx->tag);
 
@@ -127,11 +146,12 @@ ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
 			if (c->buffered & NGX_LOWLEVEL_BUFFERED) {
 				return NGX_AGAIN;
 			} else {
-				return NGX_AGAIN;
+				return NGX_DONE;
 			}
 		}
 
 	}
+}
 #endif
 
     if (ctx->in == NULL && ctx->busy == NULL

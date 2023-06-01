@@ -44,9 +44,6 @@
     <Filter Include="objs">
       <UniqueIdentifier>{2d03b64e-44e9-4027-a335-622778b90411}</UniqueIdentifier>
     </Filter>
-    <Filter Include="mytest_config">
-      <UniqueIdentifier>{7c26568f-bf6d-4762-97e1-8b4a8b6b8a86}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\nginx.c">

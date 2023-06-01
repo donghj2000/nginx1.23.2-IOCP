@@ -48,6 +48,13 @@ static ngx_command_t  ngx_iocp_commands[] = {
       offsetof(ngx_iocp_conf_t, acceptex_read),
       NULL },
 
+	{ ngx_string("iocp_buffer_size"),   //test
+	  NGX_EVENT_CONF | NGX_CONF_TAKE1,
+	  ngx_conf_set_size_slot,
+	  0,
+	  offsetof(ngx_iocp_conf_t, buffer_size),
+	  NULL },
+
       ngx_null_command
 };
 
@@ -253,7 +260,7 @@ ngx_iocp_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
 	
     rc = GetQueuedCompletionStatus(iocp, &bytes, (PULONG_PTR)&cTmp,
                                    (LPOVERLAPPED *) &ovlp, (u_long) timer);
-	
+
     if (rc == 0) {
         err = ngx_errno;
     } else {
@@ -385,6 +392,8 @@ ngx_iocp_create_conf(ngx_cycle_t *cycle)
     cf->post_acceptex = NGX_CONF_UNSET;
     cf->acceptex_read = NGX_CONF_UNSET;
 
+	cf->buffer_size = NGX_CONF_UNSET;
+
     return cf;
 }
 
@@ -397,6 +406,7 @@ ngx_iocp_init_conf(ngx_cycle_t *cycle, void *conf)
     ngx_conf_init_value(cf->threads, 0);
     ngx_conf_init_value(cf->post_acceptex, 10);
     ngx_conf_init_value(cf->acceptex_read, 1);
+	ngx_conf_init_value(cf->buffer_size, 20000);
 
     return NGX_CONF_OK;
 }

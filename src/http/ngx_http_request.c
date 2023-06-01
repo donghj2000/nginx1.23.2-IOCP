@@ -721,8 +721,8 @@ static int bio_iocp_write(BIO *b, const char *in, int len)
 		buf_len = c->sendbuf_iocp->end - c->sendbuf_iocp->start;
 		ret = ngx_min(ngx_min(len, c->sendbuf_iocp->last - c->sendbuf_iocp->pos), buf_len);
 
-		if (c->write->available > 0) {
 
+		if (c->write->available > 0 && c->write->complete == 1) {
 			ret = ngx_min(c->write->available, len);
 			c->write->complete = 0;
 			c->write->available -= ret;

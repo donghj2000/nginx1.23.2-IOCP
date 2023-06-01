@@ -13,6 +13,9 @@ typedef struct {
 	ngx_uint_t  threads;
 	ngx_uint_t  post_acceptex;
 	ngx_flag_t  acceptex_read;
+
+	ngx_uint_t  buffer_size;
+
 } ngx_iocp_conf_t;
 
 

@@ -36,6 +36,8 @@
 #pragma warning(disable:4201)
 #endif
 
+#define FD_SETSIZE 65535
+
 #include <winsock2.h>
 #include <ws2tcpip.h>  /* ipv6 */
 #include <mswsock.h>

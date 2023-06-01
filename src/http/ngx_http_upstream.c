@@ -1675,8 +1675,7 @@ ngx_http_upstream_ssl_init_connection(ngx_http_request_t *r,
     ngx_int_t                  rc;
     ngx_http_core_loc_conf_t  *clcf;
 #if (NGX_HAVE_IOCP)
-	ngx_http_connection_t     *hc;
-	ngx_http_core_srv_conf_t  *cscf;
+	ngx_iocp_conf_t  *iocpcf = NULL;
 	BIO *b;
 #endif
 
@@ -1742,15 +1741,17 @@ ngx_http_upstream_ssl_init_connection(ngx_http_request_t *r,
 		b = BIO_new_iocp(c);
 		SSL_set_bio(c->ssl->connection, b, b);
 
-		cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
+		if (ngx_get_conf(ngx_cycle->conf_ctx, ngx_events_module)) {
+			iocpcf = ngx_event_get_conf(ngx_cycle->conf_ctx, ngx_iocp_module);
+		}
 		
-		c->recvbuf_iocp = ngx_create_temp_buf(c->pool, cscf->client_header_buffer_size);
+		c->recvbuf_iocp = ngx_create_temp_buf(c->pool, iocpcf->buffer_size);
 		if (c->recvbuf_iocp == NULL) {
 			ngx_close_connection(c);
 			return NGX_ERROR;
 		}
 		
-		c->sendbuf_iocp = ngx_create_temp_buf(c->pool, cscf->client_header_buffer_size);
+		c->sendbuf_iocp = ngx_create_temp_buf(c->pool, iocpcf->buffer_size);
 		if (c->sendbuf_iocp == NULL) {
 			ngx_close_connection(c);
 			return NGX_ERROR;
@@ -2240,7 +2241,7 @@ ngx_http_upstream_send_request_body_iocp(ngx_http_request_t *r,
         } else {
             u->request_body_blocked = 0;
 
-			if (u->output.in && (u->output.in->buf) > 0)
+			if (u->output.in && ngx_buf_size(u->output.in->buf) > 0)
 				rc = NGX_AGAIN;
         }
 
@@ -2271,35 +2272,38 @@ ngx_http_upstream_send_request_body_iocp(ngx_http_request_t *r,
     }
 
     for ( ;; ) {
-
-        if (do_write) {
 		
-			if (!u->request_body_blocked && (out == NULL || do_write == 2)) {
-				out = r->request_body->bufs;
-			}
-
-            rc = ngx_output_chain(&u->output, out);
-
-            if (rc == NGX_ERROR) {
-                return NGX_ERROR;
-            }
-
-            if (rc == NGX_AGAIN) {
-				while (out) {
-					ln = out;
-					out = out->next;
-					ngx_free_chain(r->pool, ln);
+        if (do_write) {
+			c = u->peer.connection;
+			
+			if ((!u->request_body_blocked && c->write->complete == 0) || (u->request_body_blocked && c->write->complete == 1)) {
+				if (out == NULL || do_write == 2) {
+					out = r->request_body->bufs;
 				}
-                u->request_body_blocked = 1;
-				r->request_body->bufs = NULL;
-            } else {
-                u->request_body_blocked = 0;
-            }
 
-            if (rc == NGX_OK && !r->reading_body) {
-                break;
-            }
+				rc = ngx_output_chain(&u->output, out);
 
+				if (rc == NGX_ERROR) {
+					return NGX_ERROR;
+				}
+
+				if (rc == NGX_AGAIN) {
+					while (out) {
+						ln = out;
+						out = out->next;
+						ngx_free_chain(r->pool, ln);
+					}
+					u->request_body_blocked = 1;
+					r->request_body->bufs = NULL;
+				}
+				else {
+					u->request_body_blocked = 0;
+				}
+
+				if (rc == NGX_OK && !r->reading_body) {
+					break;
+				}
+			}
         }
 		
         if (r->reading_body) {
@@ -2426,6 +2430,7 @@ ngx_http_upstream_send_request_body(ngx_http_request_t *r,
             if (rc == NGX_OK && !r->reading_body) {
                 break;
             }
+
         }
 
         if (r->reading_body) {
@@ -3857,7 +3862,7 @@ ngx_http_upstream_process_non_buffered_request_iocp(ngx_http_request_t *r,
     size_t                     size;
     ssize_t                    n;
     ngx_buf_t                 *b;
-    ngx_int_t                  rc;
+    ngx_int_t                  rc = NGX_OK;
     ngx_uint_t                 flags;
     ngx_connection_t          *downstream, *upstream;
     ngx_http_upstream_t       *u;
@@ -3869,22 +3874,20 @@ ngx_http_upstream_process_non_buffered_request_iocp(ngx_http_request_t *r,
 
     b = &u->buffer;
 
-    do_write = do_write || u->length == 0;
-
     for ( ;; ) {
 
         if (do_write) {
 
 			if ((!downstream->ssl && ((u->out_bufs && (!downstream->buffered)) || (u->busy_bufs && downstream->buffered))) ||
-				(downstream->ssl)
+				(downstream->ssl )
 				)
 			{
 				ngx_chain_t *out = NULL;
-				if (downstream->write->complete) {
+				if (downstream->write->complete == 1) {
 					rc = ngx_http_output_filter(r, out);
 					ngx_chain_update_chains(r->pool, &u->free_bufs, &u->busy_bufs,
 						&out, u->output.tag);
-				} else {
+				} else if(downstream->write->complete == 0) {
 					rc = ngx_http_output_filter(r, u->out_bufs);
 					ngx_chain_update_chains(r->pool, &u->free_bufs, &u->busy_bufs,
 						&u->out_bufs, u->output.tag);
@@ -3902,9 +3905,11 @@ ngx_http_upstream_process_non_buffered_request_iocp(ngx_http_request_t *r,
                 if (u->length == 0
                     || (upstream->read->eof && u->length == -1))
                 {
-                    ngx_http_upstream_finalize_request(r, u, 0);
-                    return;
-                }
+					if (!u->out_bufs) {
+						ngx_http_upstream_finalize_request(r, u, 0);
+						return;
+					}
+				}
 
                 if (upstream->read->eof) {
                     ngx_log_error(NGX_LOG_ERR, upstream->log, 0,
@@ -3921,8 +3926,12 @@ ngx_http_upstream_process_non_buffered_request_iocp(ngx_http_request_t *r,
                     return;
                 }
 
-                b->pos = b->start;
-                b->last = b->start;
+				if (!u->out_bufs) {
+					if (upstream->ssl || (!upstream->ssl && upstream->read->complete != 2)) {
+						b->pos = b->start;
+						b->last = b->start;
+					}
+				}
             }
         }
 
@@ -4513,9 +4522,14 @@ ngx_http_upstream_process_request(ngx_http_request_t *r,
                 || (p->upstream_eof && p->length == -1))
             {
 #if (NGX_HAVE_IOCP)
-				if (p->downstream_done && ngx_event_flags & NGX_USE_IOCP_EVENT)
+				if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+				 	if (p->downstream_done)
+				        ngx_http_upstream_finalize_request(r, u, 0);
+				} else
 #endif
+				{
                     ngx_http_upstream_finalize_request(r, u, 0);
+				}
                 return;
             }
 

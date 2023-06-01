@@ -328,8 +328,10 @@ ngx_http_write_filter(ngx_http_request_t *r, ngx_chain_t *in)
     }
 
 #if (NGX_HAVE_IOCP)
-	if (!chain && c->ssl && c->ssl->handshaked) {
-		ngx_post_event(c->write, &ngx_posted_next_events);
+	if (ngx_event_flags & NGX_USE_IOCP_EVENT) { 
+		if (!chain && c->ssl && c->ssl->handshaked) {
+			ngx_post_event(c->write, &ngx_posted_next_events);
+		}
 	}
 #endif
 

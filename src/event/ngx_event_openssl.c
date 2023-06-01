@@ -8,6 +8,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_event.h>
+#include <ngx_http.h>
 
 
 #define NGX_SSL_PASSWORD_BUFFER_SIZE  4096
@@ -2650,6 +2651,13 @@ ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
             if (in->buf->last_buf || in->buf->flush) {
                 flush = 1;
             }
+			
+#if (NGX_HAVE_IOCP)
+			if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+				if (in->buf->last_buf)
+					buf->last_buf = 1;
+			}
+#endif
 
             if (ngx_buf_special(in->buf)) {
                 in = in->next;
@@ -2744,6 +2752,21 @@ ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 
         buf->pos = buf->start;
         buf->last = buf->start;
+		
+#if (NGX_HAVE_IOCP)
+		if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+			if (buf->last_buf) {
+				ngx_http_request_t       *r = (ngx_http_request_t *)c->data;
+				ngx_http_upstream_t      *u = r->upstream;
+				ngx_event_pipe_t         *p;
+				if (u) {
+					p = u->pipe;
+					p->downstream_done = 1;
+				}
+				buf->last_buf = 0;
+			}
+		}
+#endif
 
         if (in == NULL || send >= limit) {
             break;

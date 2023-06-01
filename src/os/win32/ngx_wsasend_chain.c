@@ -8,6 +8,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_event.h>
+#include <ngx_http.h>
 
 
 #define NGX_WSABUFS  64
@@ -153,7 +154,7 @@ ngx_overlapped_wsasend_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
                    "wev->complete: %d", wev->complete);
 
-    if (wev->complete) {
+    if (wev->complete==1) {
 
         /* the overlapped WSASend() complete */
 
@@ -170,6 +171,25 @@ ngx_overlapped_wsasend_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 			last_in = wev->ovlp.in;
 
 			c->sent += sent;
+			
+#if (NGX_HAVE_IOCP)
+		if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
+			for (cl = last_in; cl; cl = cl->next) {
+				if (cl->buf->last_buf){
+					    
+					ngx_http_request_t       *r = (ngx_http_request_t *)c->data;
+					ngx_http_upstream_t      *u = r->upstream;
+					ngx_event_pipe_t         *p;
+					if (u) {
+						p = u->pipe;
+						p->downstream_done = 1;
+					}
+
+					break;
+				}
+			}
+		}
+#endif
 			last_in = ngx_chain_update_sent(last_in, sent);
 
 			return last_in;
@@ -189,7 +209,8 @@ ngx_overlapped_wsasend_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 	if (in == NULL) {
 		return NULL;
 	}
-	
+	if (wev->complete == 2)
+		return NULL;
 	{
 		/* post the overlapped WSASend() */
 
@@ -257,7 +278,7 @@ ngx_overlapped_wsasend_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 		c->write->ovlp.error = 0;
 		rc = WSASend(c->fd, vec.elts, vec.nelts, &sent, 0, ovlp, NULL);
 
-        wev->complete = 0;
+        wev->complete = 2;
 
         if (rc == -1) {
 		    wev->ready = 0;

@@ -123,7 +123,7 @@ ngx_overlapped_wsarecv(ngx_connection_t *c, u_char *buf, size_t size)
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
                    "rev->complete: %d", rev->complete);
 
-    if (rev->complete) {
+    if (rev->complete==1) {
         rev->complete = 0;
 
         if (ngx_event_flags & NGX_USE_IOCP_EVENT) {
@@ -164,7 +164,7 @@ ngx_overlapped_wsarecv(ngx_connection_t *c, u_char *buf, size_t size)
 	rev->ovlp.opp_type = NGX_IOCP_IO;
     rc = WSARecv(c->fd, wsabuf, 1, &bytes, &flags, ovlp, NULL);
 
-    rev->complete = 0;
+    rev->complete = 2;
 
     ngx_log_debug4(NGX_LOG_DEBUG_EVENT, c->log, 0,
                    "WSARecv ovlp: fd:%d rc:%d %ul of %z",
